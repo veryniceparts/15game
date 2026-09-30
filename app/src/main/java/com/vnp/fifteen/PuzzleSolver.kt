@@ -26,7 +26,7 @@ object PuzzleSolver {
     private const val FOUND = -1
     private const val TIMEOUT = -2
 
-    fun solve(board: IntArray): Result {
+    fun solve(board: IntArray, timeBudgetMs: Long = TIME_BUDGET_MS): Result {
         val start = System.currentTimeMillis()
         val working = board.copyOf()
         var bound = heuristic(working)
@@ -34,11 +34,11 @@ object PuzzleSolver {
         var solutionPath: IntArray? = null
 
         while (true) {
-            if (Thread.interrupted() || System.currentTimeMillis() - start > TIME_BUDGET_MS) {
+            if (Thread.interrupted() || System.currentTimeMillis() - start > timeBudgetMs) {
                 return Result.TimedOut(bound)
             }
             val blank = working.indexOf(0)
-            val outcome = search(working, 0, bound, blank, -1, start, pathBuffer) { length ->
+            val outcome = search(working, 0, bound, blank, -1, start, timeBudgetMs, pathBuffer) { length ->
                 solutionPath = pathBuffer.copyOfRange(0, length)
             }
             when (outcome) {
@@ -49,6 +49,41 @@ object PuzzleSolver {
         }
     }
 
+    /**
+     * Best-effort single move that most reduces the heuristic distance to solved.
+     * Used as a quick stand-in for the real next move when a fully optimal path
+     * couldn't be proven within the time budget. Returns null if [board] has no
+     * blank tile.
+     */
+    fun bestNeighborMove(board: IntArray): Int? {
+        val blank = board.indexOf(0)
+        if (blank == -1) return null
+        val working = board.copyOf()
+        var best: Int? = null
+        var bestScore = Int.MAX_VALUE
+        for (neighbor in neighborIndices(blank)) {
+            swap(working, blank, neighbor)
+            val score = heuristic(working)
+            swap(working, blank, neighbor)
+            if (score < bestScore) {
+                bestScore = score
+                best = neighbor
+            }
+        }
+        return best
+    }
+
+    private fun neighborIndices(index: Int): List<Int> {
+        val row = index / SIZE
+        val col = index % SIZE
+        val result = mutableListOf<Int>()
+        if (row > 0) result.add(index - SIZE)
+        if (row < SIZE - 1) result.add(index + SIZE)
+        if (col > 0) result.add(index - 1)
+        if (col < SIZE - 1) result.add(index + 1)
+        return result
+    }
+
     private fun search(
         board: IntArray,
         g: Int,
@@ -56,6 +91,7 @@ object PuzzleSolver {
         blankPos: Int,
         cameFrom: Int,
         start: Long,
+        timeBudgetMs: Long,
         pathBuffer: IntArray,
         onFound: (Int) -> Unit
     ): Int {
@@ -65,7 +101,7 @@ object PuzzleSolver {
             onFound(g)
             return FOUND
         }
-        if (Thread.interrupted() || System.currentTimeMillis() - start > TIME_BUDGET_MS) return TIMEOUT
+        if (Thread.interrupted() || System.currentTimeMillis() - start > timeBudgetMs) return TIMEOUT
 
         var min = Int.MAX_VALUE
         val row = blankPos / SIZE
@@ -75,7 +111,7 @@ object PuzzleSolver {
             val neighbor = blankPos - SIZE
             pathBuffer[g] = neighbor
             swap(board, blankPos, neighbor)
-            val t = search(board, g + 1, bound, neighbor, blankPos, start, pathBuffer, onFound)
+            val t = search(board, g + 1, bound, neighbor, blankPos, start, timeBudgetMs, pathBuffer, onFound)
             swap(board, blankPos, neighbor)
             if (t == FOUND || t == TIMEOUT) return t
             if (t < min) min = t
@@ -84,7 +120,7 @@ object PuzzleSolver {
             val neighbor = blankPos + SIZE
             pathBuffer[g] = neighbor
             swap(board, blankPos, neighbor)
-            val t = search(board, g + 1, bound, neighbor, blankPos, start, pathBuffer, onFound)
+            val t = search(board, g + 1, bound, neighbor, blankPos, start, timeBudgetMs, pathBuffer, onFound)
             swap(board, blankPos, neighbor)
             if (t == FOUND || t == TIMEOUT) return t
             if (t < min) min = t
@@ -93,7 +129,7 @@ object PuzzleSolver {
             val neighbor = blankPos - 1
             pathBuffer[g] = neighbor
             swap(board, blankPos, neighbor)
-            val t = search(board, g + 1, bound, neighbor, blankPos, start, pathBuffer, onFound)
+            val t = search(board, g + 1, bound, neighbor, blankPos, start, timeBudgetMs, pathBuffer, onFound)
             swap(board, blankPos, neighbor)
             if (t == FOUND || t == TIMEOUT) return t
             if (t < min) min = t
@@ -102,7 +138,7 @@ object PuzzleSolver {
             val neighbor = blankPos + 1
             pathBuffer[g] = neighbor
             swap(board, blankPos, neighbor)
-            val t = search(board, g + 1, bound, neighbor, blankPos, start, pathBuffer, onFound)
+            val t = search(board, g + 1, bound, neighbor, blankPos, start, timeBudgetMs, pathBuffer, onFound)
             swap(board, blankPos, neighbor)
             if (t == FOUND || t == TIMEOUT) return t
             if (t < min) min = t

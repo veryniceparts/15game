@@ -26,10 +26,12 @@ class PuzzleView @JvmOverloads constructor(
     var onWin: ((moves: Int) -> Unit)? = null
     var onShuffle: (() -> Unit)? = null
 
-    /** Set while an automated replay (e.g. "show optimal solve") is driving the board, to ignore user taps. */
+    /** Set while a programmatic move (e.g. the "step toward optimal" button) is being computed, to ignore user taps. */
     var isLocked = false
 
     private val board = IntArray(TILE_COUNT) { (it + 1) % TILE_COUNT }
+    /** Blank-tile position before each committed move, in order, so [undo] can replay it in reverse. */
+    private val moveHistory = ArrayDeque<Int>()
     private var moves = 0
     private var solved = true
     private var boardSize = 0f
@@ -67,6 +69,7 @@ class PuzzleView @JvmOverloads constructor(
         animator?.cancel()
         slidingFromIndex = -1
         slidingToIndex = -1
+        moveHistory.clear()
         do {
             for (i in board.indices) board[i] = (i + 1) % TILE_COUNT
             var blankIndex = TILE_COUNT - 1
@@ -87,6 +90,10 @@ class PuzzleView @JvmOverloads constructor(
 
     /** Read-only copy of the current tile layout, for external analysis (e.g. an optimal-move solver). */
     fun snapshotBoard(): IntArray = board.copyOf()
+
+    val isSolvedNow: Boolean get() = solved
+
+    fun canUndo(): Boolean = !isLocked && slidingFromIndex == -1 && moveHistory.isNotEmpty()
 
     private fun neighborIndices(index: Int): List<Int> {
         val row = index / SIZE
@@ -118,20 +125,32 @@ class PuzzleView @JvmOverloads constructor(
         return true
     }
 
-    /** Slides the tile at [tappedIndex] into the blank, the same as a user tap -- used to replay a solution. */
-    fun playMove(tappedIndex: Int) {
-        if (solved || slidingFromIndex != -1) return
-        attemptMove(tappedIndex)
+    /** Slides the tile at [tappedIndex] into the blank, the same as a user tap -- used for programmatic moves. */
+    fun playMove(tappedIndex: Int): Boolean {
+        if (solved || slidingFromIndex != -1) return false
+        return attemptMove(tappedIndex)
     }
 
-    private fun attemptMove(tappedIndex: Int) {
+    /** Reverses the last committed move, if any. */
+    fun undo(): Boolean {
+        if (!canUndo()) return false
+        val prevBlank = moveHistory.removeLast()
+        solved = false
+        startSlide(prevBlank, board.indexOf(BLANK), isUndo = true)
+        return true
+    }
+
+    private fun attemptMove(tappedIndex: Int): Boolean {
         val blankIndex = board.indexOf(BLANK)
         if (tappedIndex in neighborIndices(blankIndex)) {
+            moveHistory.addLast(blankIndex)
             startSlide(tappedIndex, blankIndex)
+            return true
         }
+        return false
     }
 
-    private fun startSlide(fromIndex: Int, toIndex: Int) {
+    private fun startSlide(fromIndex: Int, toIndex: Int, isUndo: Boolean = false) {
         slidingFromIndex = fromIndex
         slidingToIndex = toIndex
         slideFraction = 0f
@@ -145,22 +164,26 @@ class PuzzleView @JvmOverloads constructor(
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                    finishSlide(fromIndex, toIndex)
+                    finishSlide(fromIndex, toIndex, isUndo)
                 }
             })
             start()
         }
     }
 
-    private fun finishSlide(fromIndex: Int, toIndex: Int) {
+    private fun finishSlide(fromIndex: Int, toIndex: Int, isUndo: Boolean) {
         board[toIndex] = board[fromIndex]
         board[fromIndex] = BLANK
         slidingFromIndex = -1
         slidingToIndex = -1
-        moves++
+        if (isUndo) {
+            moves = (moves - 1).coerceAtLeast(0)
+        } else {
+            moves++
+        }
         onMove?.invoke(moves)
         invalidate()
-        if (isSolved()) {
+        if (!isUndo && isSolved()) {
             solved = true
             onWin?.invoke(moves)
         }
