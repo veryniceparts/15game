@@ -6,8 +6,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
-/** Shorter time budget for the on-demand "step toward optimal" button, so a click stays snappy. */
-private const val STEP_TIME_BUDGET_MS = 2500L
+/** Time budget for an on-demand recompute (triggered by divergence), kept short so it stays responsive. */
+private const val RECOMPUTE_EXACT_BUDGET_MS = 2500L
+private const val RECOMPUTE_GREEDY_BUDGET_MS = 4000L
 
 class MainActivity : AppCompatActivity() {
 
@@ -17,6 +18,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var stepButton: Button
     private var solverThread: Thread? = null
     private var solverGeneration = 0
+    private var isComputing = false
+
+    /** Remaining moves of the last known path to solved, and the board it was computed for. Null when stale/unknown. */
+    private var cachedPath: IntArray? = null
+    private var cachedPathBoard: IntArray? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,13 +37,18 @@ class MainActivity : AppCompatActivity() {
 
         puzzleView.onMove = { moves ->
             movesText.text = getString(R.string.moves_format, moves)
-            undoButton.isEnabled = puzzleView.canUndo()
-            stepButton.isEnabled = !puzzleView.isSolvedNow
+            undoButton.isEnabled = puzzleView.canUndo() && !isComputing
+            stepButton.isEnabled = !puzzleView.isSolvedNow && !isComputing
+            reconcileCacheWithBoard()
         }
         puzzleView.onWin = { moves ->
             Toast.makeText(this, getString(R.string.win_message, moves), Toast.LENGTH_LONG).show()
         }
-        puzzleView.onShuffle = { startSolving() }
+        puzzleView.onShuffle = {
+            cachedPath = null
+            cachedPathBoard = null
+            startSolving()
+        }
         shuffleButton.setOnClickListener {
             puzzleView.shuffle()
         }
@@ -53,6 +64,31 @@ class MainActivity : AppCompatActivity() {
         startSolving() // covers the initial shuffle already done while the view was created
     }
 
+    /** After any committed move, keeps [cachedPath] in sync if it matches, or drops it if the board diverged. */
+    private fun reconcileCacheWithBoard() {
+        val path = cachedPath
+        val pathBoard = cachedPathBoard
+        if (path == null || pathBoard == null || path.isEmpty()) return
+        val expected = applyMove(pathBoard, path.first())
+        val actual = puzzleView.snapshotBoard()
+        if (expected.contentEquals(actual)) {
+            cachedPath = path.copyOfRange(1, path.size)
+            cachedPathBoard = actual
+        } else {
+            cachedPath = null
+            cachedPathBoard = null
+        }
+    }
+
+    private fun applyMove(board: IntArray, tappedIndex: Int): IntArray {
+        val blank = board.indexOf(0)
+        val result = board.copyOf()
+        result[blank] = result[tappedIndex]
+        result[tappedIndex] = 0
+        return result
+    }
+
+    /** Background solve used only to populate the "Optimal: N" label and prime the path cache after a shuffle. */
     private fun startSolving() {
         solverThread?.interrupt()
         val generation = ++solverGeneration
@@ -60,12 +96,20 @@ class MainActivity : AppCompatActivity() {
 
         val board = puzzleView.snapshotBoard()
         val thread = Thread {
-            val result = PuzzleSolver.solve(board)
+            val result = PuzzleSolver.findPath(board)
             runOnUiThread {
                 if (generation == solverGeneration) {
                     optimalText.text = when (result) {
-                        is PuzzleSolver.Result.Solved -> getString(R.string.optimal_format, result.moves)
-                        is PuzzleSolver.Result.TimedOut -> getString(R.string.optimal_lower_bound_format, result.lowerBound)
+                        is PuzzleSolver.PathResult.Exact -> getString(R.string.optimal_format, result.moves)
+                        is PuzzleSolver.PathResult.Approximate -> getString(R.string.optimal_lower_bound_format, result.lowerBound)
+                    }
+                    if (cachedPath == null && board.contentEquals(puzzleView.snapshotBoard())) {
+                        val path = when (result) {
+                            is PuzzleSolver.PathResult.Exact -> result.path
+                            is PuzzleSolver.PathResult.Approximate -> result.path
+                        }
+                        cachedPath = path
+                        cachedPathBoard = board
                     }
                 }
             }
@@ -74,10 +118,21 @@ class MainActivity : AppCompatActivity() {
         thread.start()
     }
 
-    /** Recomputes the optimal solution for the current board and plays just its first move. */
+    /** Follows the cached path one step at a time; only recalculates when the board has diverged from it. */
     private fun stepTowardOptimal() {
+        val path = cachedPath
+        val pathBoard = cachedPathBoard
+        if (path != null && path.isNotEmpty() && pathBoard != null && pathBoard.contentEquals(puzzleView.snapshotBoard())) {
+            puzzleView.playMove(path.first())
+            return
+        }
+        recomputeAndStep()
+    }
+
+    private fun recomputeAndStep() {
         solverThread?.interrupt()
         val generation = ++solverGeneration
+        isComputing = true
         stepButton.isEnabled = false
         undoButton.isEnabled = false
         puzzleView.isLocked = true
@@ -85,21 +140,29 @@ class MainActivity : AppCompatActivity() {
 
         val board = puzzleView.snapshotBoard()
         val thread = Thread {
-            val result = PuzzleSolver.solve(board, STEP_TIME_BUDGET_MS)
-            val move = when (result) {
-                is PuzzleSolver.Result.Solved -> result.path.firstOrNull()
-                is PuzzleSolver.Result.TimedOut -> PuzzleSolver.bestNeighborMove(board)
-            }
+            val result = PuzzleSolver.findPath(board, RECOMPUTE_EXACT_BUDGET_MS, RECOMPUTE_GREEDY_BUDGET_MS)
             runOnUiThread {
                 if (generation == solverGeneration) {
-                    optimalText.text = when (result) {
-                        is PuzzleSolver.Result.Solved -> getString(R.string.optimal_format, result.moves)
-                        is PuzzleSolver.Result.TimedOut -> getString(R.string.optimal_lower_bound_format, result.lowerBound)
+                    val path = when (result) {
+                        is PuzzleSolver.PathResult.Exact -> {
+                            optimalText.text = getString(R.string.optimal_format, result.moves)
+                            result.path
+                        }
+                        is PuzzleSolver.PathResult.Approximate -> {
+                            optimalText.text = getString(R.string.optimal_lower_bound_format, result.lowerBound)
+                            result.path
+                        }
                     }
-                    move?.let { puzzleView.playMove(it) }
+                    cachedPath = path
+                    cachedPathBoard = board
+                    isComputing = false
                     puzzleView.isLocked = false
-                    stepButton.isEnabled = !puzzleView.isSolvedNow
-                    undoButton.isEnabled = puzzleView.canUndo()
+                    if (path.isNotEmpty()) {
+                        puzzleView.playMove(path.first())
+                    } else {
+                        stepButton.isEnabled = !puzzleView.isSolvedNow
+                        undoButton.isEnabled = puzzleView.canUndo()
+                    }
                 }
             }
         }

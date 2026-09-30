@@ -20,8 +20,17 @@ object PuzzleSolver {
         data class TimedOut(val lowerBound: Int) : Result()
     }
 
+    /** A full sequence of moves from a board to solved, for driving playback/step controls. */
+    sealed class PathResult {
+        /** [path] is a proven-optimal solution. */
+        data class Exact(val moves: Int, val path: IntArray) : PathResult()
+        /** [path] reaches solved but isn't proven optimal; [lowerBound] is the best-known floor on the true optimum. */
+        data class Approximate(val lowerBound: Int, val path: IntArray) : PathResult()
+    }
+
     private const val SIZE = 4
     private const val TIME_BUDGET_MS = 6000L
+    private const val GREEDY_TIME_BUDGET_MS = 5000L
     private const val MAX_DEPTH = 120
     private const val FOUND = -1
     private const val TIMEOUT = -2
@@ -47,6 +56,82 @@ object PuzzleSolver {
                 else -> bound = outcome
             }
         }
+    }
+
+    /**
+     * Finds a full path from [board] to solved: the proven-optimal one when it can be
+     * found within [exactBudgetMs], otherwise a fast (weighted A*) best-effort path
+     * within [greedyBudgetMs] so a step/undo UI always has a real sequence to follow
+     * instead of re-deciding one move at a time.
+     */
+    fun findPath(
+        board: IntArray,
+        exactBudgetMs: Long = TIME_BUDGET_MS,
+        greedyBudgetMs: Long = GREEDY_TIME_BUDGET_MS
+    ): PathResult {
+        return when (val result = solve(board, exactBudgetMs)) {
+            is Result.Solved -> PathResult.Exact(result.moves, result.path)
+            is Result.TimedOut -> {
+                val path = findGreedyPath(board, greedyBudgetMs)
+                    ?: bestNeighborMove(board)?.let { intArrayOf(it) }
+                    ?: IntArray(0)
+                PathResult.Approximate(result.lowerBound, path)
+            }
+        }
+    }
+
+    /**
+     * Weighted A* (f = g + 2h) with a visited set, so it always terminates on a real
+     * (if not necessarily optimal) solution quickly instead of oscillating the way a
+     * single greedy step can. Returns null if it exhausts [timeBudgetMs] first.
+     */
+    private fun findGreedyPath(board: IntArray, timeBudgetMs: Long): IntArray? {
+        val start = System.currentTimeMillis()
+        if (isSolved(board)) return IntArray(0)
+
+        class Node(val board: IntArray, val blank: Int, val move: Int, val parent: Node?, val g: Int)
+
+        val startNode = Node(board.copyOf(), board.indexOf(0), -1, null, 0)
+        val open = java.util.PriorityQueue<Node>(compareBy { it.g + 2 * heuristic(it.board) })
+        open.add(startNode)
+        val visited = HashSet<Long>()
+        visited.add(packBoard(startNode.board))
+
+        while (open.isNotEmpty()) {
+            if (Thread.interrupted() || System.currentTimeMillis() - start > timeBudgetMs) return null
+            val current = open.poll()
+            if (isSolved(current.board)) {
+                val moves = mutableListOf<Int>()
+                var node: Node? = current
+                while (node != null && node.move != -1) {
+                    moves.add(0, node.move)
+                    node = node.parent
+                }
+                return moves.toIntArray()
+            }
+            for (neighbor in neighborIndices(current.blank)) {
+                val nextBoard = current.board.copyOf()
+                swap(nextBoard, current.blank, neighbor)
+                if (visited.add(packBoard(nextBoard))) {
+                    open.add(Node(nextBoard, neighbor, neighbor, current, current.g + 1))
+                }
+            }
+        }
+        return null
+    }
+
+    private fun isSolved(board: IntArray): Boolean {
+        for (i in board.indices) {
+            val expected = if (i == board.size - 1) 0 else i + 1
+            if (board[i] != expected) return false
+        }
+        return true
+    }
+
+    private fun packBoard(board: IntArray): Long {
+        var key = 0L
+        for (value in board) key = (key shl 4) or value.toLong()
+        return key
     }
 
     /**
