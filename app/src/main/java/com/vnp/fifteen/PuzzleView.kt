@@ -26,6 +26,9 @@ class PuzzleView @JvmOverloads constructor(
     var onWin: ((moves: Int) -> Unit)? = null
     var onShuffle: (() -> Unit)? = null
 
+    /** Set while an automated replay (e.g. "show optimal solve") is driving the board, to ignore user taps. */
+    var isLocked = false
+
     private val board = IntArray(TILE_COUNT) { (it + 1) % TILE_COUNT }
     private var moves = 0
     private var solved = true
@@ -104,19 +107,28 @@ class PuzzleView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action != MotionEvent.ACTION_UP || solved || slidingFromIndex != -1) return true
+        if (isLocked || event.action != MotionEvent.ACTION_UP || solved || slidingFromIndex != -1) return true
         val offsetX = (width - boardSize) / 2f
         val offsetY = (height - boardSize) / 2f
         val col = ((event.x - offsetX) / (tileSize + gap)).toInt()
         val row = ((event.y - offsetY) / (tileSize + gap)).toInt()
         if (row !in 0 until SIZE || col !in 0 until SIZE) return true
 
-        val tappedIndex = row * SIZE + col
+        attemptMove(row * SIZE + col)
+        return true
+    }
+
+    /** Slides the tile at [tappedIndex] into the blank, the same as a user tap -- used to replay a solution. */
+    fun playMove(tappedIndex: Int) {
+        if (solved || slidingFromIndex != -1) return
+        attemptMove(tappedIndex)
+    }
+
+    private fun attemptMove(tappedIndex: Int) {
         val blankIndex = board.indexOf(BLANK)
         if (tappedIndex in neighborIndices(blankIndex)) {
             startSlide(tappedIndex, blankIndex)
         }
-        return true
     }
 
     private fun startSlide(fromIndex: Int, toIndex: Int) {

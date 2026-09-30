@@ -6,4 +6,5 @@
     <string name="optimal_computing">Optimal: calculating…</string>
     <string name="optimal_format">Optimal: %1$d moves</string>
     <string name="optimal_lower_bound_format">Optimal: at least %1$d moves (search timed out)</string>
+    <string name="show_optimal_solve">Show optimal solve</string>
 </resources>

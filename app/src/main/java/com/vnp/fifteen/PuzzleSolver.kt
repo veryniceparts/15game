@@ -15,12 +15,14 @@ import kotlin.math.abs
 object PuzzleSolver {
 
     sealed class Result {
-        data class Solved(val moves: Int) : Result()
+        /** [path] holds, in order, the board index tapped at each step (the tile that slides into the blank). */
+        data class Solved(val moves: Int, val path: IntArray) : Result()
         data class TimedOut(val lowerBound: Int) : Result()
     }
 
     private const val SIZE = 4
     private const val TIME_BUDGET_MS = 6000L
+    private const val MAX_DEPTH = 120
     private const val FOUND = -1
     private const val TIMEOUT = -2
 
@@ -28,16 +30,19 @@ object PuzzleSolver {
         val start = System.currentTimeMillis()
         val working = board.copyOf()
         var bound = heuristic(working)
-        var solutionLength = -1
+        val pathBuffer = IntArray(MAX_DEPTH)
+        var solutionPath: IntArray? = null
 
         while (true) {
             if (Thread.interrupted() || System.currentTimeMillis() - start > TIME_BUDGET_MS) {
                 return Result.TimedOut(bound)
             }
             val blank = working.indexOf(0)
-            val outcome = search(working, 0, bound, blank, -1, start) { length -> solutionLength = length }
+            val outcome = search(working, 0, bound, blank, -1, start, pathBuffer) { length ->
+                solutionPath = pathBuffer.copyOfRange(0, length)
+            }
             when (outcome) {
-                FOUND -> return Result.Solved(solutionLength)
+                FOUND -> return Result.Solved(solutionPath!!.size, solutionPath!!)
                 TIMEOUT -> return Result.TimedOut(bound)
                 else -> bound = outcome
             }
@@ -51,6 +56,7 @@ object PuzzleSolver {
         blankPos: Int,
         cameFrom: Int,
         start: Long,
+        pathBuffer: IntArray,
         onFound: (Int) -> Unit
     ): Int {
         val f = g + heuristic(board)
@@ -67,32 +73,36 @@ object PuzzleSolver {
 
         if (row > 0 && blankPos - SIZE != cameFrom) {
             val neighbor = blankPos - SIZE
+            pathBuffer[g] = neighbor
             swap(board, blankPos, neighbor)
-            val t = search(board, g + 1, bound, neighbor, blankPos, start, onFound)
+            val t = search(board, g + 1, bound, neighbor, blankPos, start, pathBuffer, onFound)
             swap(board, blankPos, neighbor)
             if (t == FOUND || t == TIMEOUT) return t
             if (t < min) min = t
         }
         if (row < SIZE - 1 && blankPos + SIZE != cameFrom) {
             val neighbor = blankPos + SIZE
+            pathBuffer[g] = neighbor
             swap(board, blankPos, neighbor)
-            val t = search(board, g + 1, bound, neighbor, blankPos, start, onFound)
+            val t = search(board, g + 1, bound, neighbor, blankPos, start, pathBuffer, onFound)
             swap(board, blankPos, neighbor)
             if (t == FOUND || t == TIMEOUT) return t
             if (t < min) min = t
         }
         if (col > 0 && blankPos - 1 != cameFrom) {
             val neighbor = blankPos - 1
+            pathBuffer[g] = neighbor
             swap(board, blankPos, neighbor)
-            val t = search(board, g + 1, bound, neighbor, blankPos, start, onFound)
+            val t = search(board, g + 1, bound, neighbor, blankPos, start, pathBuffer, onFound)
             swap(board, blankPos, neighbor)
             if (t == FOUND || t == TIMEOUT) return t
             if (t < min) min = t
         }
         if (col < SIZE - 1 && blankPos + 1 != cameFrom) {
             val neighbor = blankPos + 1
+            pathBuffer[g] = neighbor
             swap(board, blankPos, neighbor)
-            val t = search(board, g + 1, bound, neighbor, blankPos, start, onFound)
+            val t = search(board, g + 1, bound, neighbor, blankPos, start, pathBuffer, onFound)
             swap(board, blankPos, neighbor)
             if (t == FOUND || t == TIMEOUT) return t
             if (t < min) min = t
