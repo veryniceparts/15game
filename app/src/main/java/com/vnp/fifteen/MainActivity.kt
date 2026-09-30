@@ -19,6 +19,7 @@ class MainActivity : AppCompatActivity() {
     private var solverThread: Thread? = null
     private var solverGeneration = 0
     private var isComputing = false
+    private var currentMoves = 0
 
     /** Remaining moves of the last known path to solved, and the board it was computed for. Null when stale/unknown. */
     private var cachedPath: IntArray? = null
@@ -36,6 +37,7 @@ class MainActivity : AppCompatActivity() {
         stepButton = findViewById(R.id.stepButton)
 
         puzzleView.onMove = { moves ->
+            currentMoves = moves
             movesText.text = getString(R.string.moves_format, moves)
             undoButton.isEnabled = puzzleView.canUndo() && !isComputing
             stepButton.isEnabled = !puzzleView.isSolvedNow && !isComputing
@@ -95,13 +97,16 @@ class MainActivity : AppCompatActivity() {
         optimalText.text = getString(R.string.optimal_computing)
 
         val board = puzzleView.snapshotBoard()
+        val movesAtRequest = currentMoves
         val thread = Thread {
             val result = PuzzleSolver.findPath(board)
             runOnUiThread {
                 if (generation == solverGeneration) {
                     optimalText.text = when (result) {
-                        is PuzzleSolver.PathResult.Exact -> getString(R.string.optimal_format, result.moves)
-                        is PuzzleSolver.PathResult.Approximate -> getString(R.string.optimal_lower_bound_format, result.lowerBound)
+                        is PuzzleSolver.PathResult.Exact ->
+                            getString(R.string.optimal_format, movesAtRequest + result.moves)
+                        is PuzzleSolver.PathResult.Approximate ->
+                            getString(R.string.optimal_lower_bound_format, movesAtRequest + result.lowerBound)
                     }
                     if (cachedPath == null && board.contentEquals(puzzleView.snapshotBoard())) {
                         val path = when (result) {
@@ -139,17 +144,18 @@ class MainActivity : AppCompatActivity() {
         optimalText.text = getString(R.string.optimal_computing)
 
         val board = puzzleView.snapshotBoard()
+        val movesAtRequest = currentMoves
         val thread = Thread {
             val result = PuzzleSolver.findPath(board, RECOMPUTE_EXACT_BUDGET_MS, RECOMPUTE_GREEDY_BUDGET_MS)
             runOnUiThread {
                 if (generation == solverGeneration) {
                     val path = when (result) {
                         is PuzzleSolver.PathResult.Exact -> {
-                            optimalText.text = getString(R.string.optimal_format, result.moves)
+                            optimalText.text = getString(R.string.optimal_format, movesAtRequest + result.moves)
                             result.path
                         }
                         is PuzzleSolver.PathResult.Approximate -> {
-                            optimalText.text = getString(R.string.optimal_lower_bound_format, result.lowerBound)
+                            optimalText.text = getString(R.string.optimal_lower_bound_format, movesAtRequest + result.lowerBound)
                             result.path
                         }
                     }
