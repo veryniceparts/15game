@@ -24,6 +24,7 @@ class PuzzleView @JvmOverloads constructor(
 
     var onMove: ((moves: Int) -> Unit)? = null
     var onWin: ((moves: Int) -> Unit)? = null
+    var onShuffle: (() -> Unit)? = null
 
     private val board = IntArray(TILE_COUNT) { (it + 1) % TILE_COUNT }
     private var moves = 0
@@ -78,7 +79,11 @@ class PuzzleView @JvmOverloads constructor(
         solved = false
         onMove?.invoke(moves)
         invalidate()
+        onShuffle?.invoke()
     }
+
+    /** Read-only copy of the current tile layout, for external analysis (e.g. an optimal-move solver). */
+    fun snapshotBoard(): IntArray = board.copyOf()
 
     private fun neighborIndices(index: Int): List<Int> {
         val row = index / SIZE

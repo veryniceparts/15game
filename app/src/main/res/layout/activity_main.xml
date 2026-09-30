@@ -28,6 +28,15 @@
         android:textSize="16sp"
         tools:text="Moves: 0" />
 
+    <TextView
+        android:id="@+id/optimalText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textColor="@color/text_secondary"
+        android:textSize="14sp"
+        tools:text="Optimal: 42 moves" />
+
     <com.vnp.fifteen.PuzzleView
         android:id="@+id/puzzleView"
         android:layout_width="match_parent"
