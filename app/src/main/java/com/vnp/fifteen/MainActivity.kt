@@ -45,7 +45,15 @@ class MainActivity : AppCompatActivity() {
             movesText.text = getString(R.string.moves_format, moves)
             undoButton.isEnabled = puzzleView.canUndo() && !isComputing
             stepButton.isEnabled = !puzzleView.isSolvedNow && !isComputing
-            reconcileCacheWithBoard()
+            reconcileStepCache()
+            if (puzzleView.isSolvedNow) {
+                solverThread?.interrupt()
+                ++solverGeneration
+            } else {
+                // Always kick off a fresh background solve after every move, so the label keeps
+                // tracking the live optimal total instead of only updating on an explicit request.
+                refreshOptimal(RECOMPUTE_EXACT_BUDGET_MS, RECOMPUTE_GREEDY_BUDGET_MS, lockUi = false, playFirstMoveWhenDone = false)
+            }
         }
         puzzleView.onWin = { moves ->
             Toast.makeText(this, getString(R.string.win_message, moves), Toast.LENGTH_LONG).show()
@@ -53,6 +61,7 @@ class MainActivity : AppCompatActivity() {
         puzzleView.onShuffle = {
             cachedPath = null
             cachedPathBoard = null
+            optimalText.text = getString(R.string.optimal_computing)
             refreshOptimal(INITIAL_EXACT_BUDGET_MS, INITIAL_GREEDY_BUDGET_MS, lockUi = false, playFirstMoveWhenDone = false)
         }
         shuffleButton.setOnClickListener {
@@ -68,16 +77,12 @@ class MainActivity : AppCompatActivity() {
         movesText.text = getString(R.string.moves_format, 0)
         undoButton.isEnabled = false
         // Covers the initial shuffle already done while the view was created.
+        optimalText.text = getString(R.string.optimal_computing)
         refreshOptimal(INITIAL_EXACT_BUDGET_MS, INITIAL_GREEDY_BUDGET_MS, lockUi = false, playFirstMoveWhenDone = false)
     }
 
-    /**
-     * After any committed move, keeps [cachedPath] in sync if it matches the move just made.
-     * If the board diverged (a manual tap or undo that didn't match the cached next step), the
-     * cached "Optimal: N" label is now stale -- possibly even less than the current move count
-     * -- so quietly recompute it in the background without locking the board.
-     */
-    private fun reconcileCacheWithBoard() {
+    /** Keeps [cachedPath] in sync with the board so the step button can keep following it without recomputing. */
+    private fun reconcileStepCache() {
         val path = cachedPath
         val pathBoard = cachedPathBoard
         if (path != null && pathBoard != null && path.isNotEmpty()) {
@@ -89,12 +94,8 @@ class MainActivity : AppCompatActivity() {
                 return
             }
         }
-        // No valid cache for the current board (diverged, or a prior refresh hasn't landed yet):
-        // keep (re)triggering a background refresh so the label converges on the latest position
-        // instead of showing a stale total left over from before this move.
         cachedPath = null
         cachedPathBoard = null
-        refreshOptimal(RECOMPUTE_EXACT_BUDGET_MS, RECOMPUTE_GREEDY_BUDGET_MS, lockUi = false, playFirstMoveWhenDone = false)
     }
 
     private fun applyMove(board: IntArray, tappedIndex: Int): IntArray {
@@ -120,8 +121,10 @@ class MainActivity : AppCompatActivity() {
      * Recomputes a full path to solved from the current board and updates the "Optimal: N" label
      * as (moves already made) + (moves this path still needs) -- so it always reads as a live
      * best-possible total from here, never less than the move counter. [lockUi] blocks input while
-     * computing (used for an explicit step request); a background divergence refresh leaves input
-     * free. [playFirstMoveWhenDone] plays the path's first move once it's ready (the step button).
+     * computing (used for an explicit step request) and shows a "calculating" placeholder; a
+     * background per-move refresh runs in parallel without locking input or blanking the label --
+     * the old number stays up until the new one lands, so it just updates live. [playFirstMoveWhenDone]
+     * plays the path's first move once it's ready (the step button).
      */
     private fun refreshOptimal(exactBudgetMs: Long, greedyBudgetMs: Long, lockUi: Boolean, playFirstMoveWhenDone: Boolean) {
         solverThread?.interrupt()
@@ -131,8 +134,8 @@ class MainActivity : AppCompatActivity() {
             stepButton.isEnabled = false
             undoButton.isEnabled = false
             puzzleView.isLocked = true
+            optimalText.text = getString(R.string.optimal_computing)
         }
-        optimalText.text = getString(R.string.optimal_computing)
 
         val board = puzzleView.snapshotBoard()
         val movesAtRequest = currentMoves
