@@ -15,6 +15,9 @@ private const val INITIAL_GREEDY_BUDGET_MS = 5000L
 private const val RECOMPUTE_EXACT_BUDGET_MS = 2500L
 private const val RECOMPUTE_GREEDY_BUDGET_MS = 4000L
 
+private const val PREFS_NAME = "fifteen_prefs"
+private const val PREF_OPTIMAL_HIDDEN = "optimal_hidden"
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var optimalText: TextView
@@ -76,8 +79,13 @@ class MainActivity : AppCompatActivity() {
         }
         // Purely cosmetic spoiler toggle: tapping the label hides it in place (no layout shift),
         // tapping the same spot again reveals it. Doesn't touch the solver or its live updates.
+        // The hidden/shown choice is remembered across app restarts via SharedPreferences.
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        optimalText.visibility = if (prefs.getBoolean(PREF_OPTIMAL_HIDDEN, false)) View.INVISIBLE else View.VISIBLE
         optimalText.setOnClickListener {
-            optimalText.visibility = if (optimalText.visibility == View.VISIBLE) View.INVISIBLE else View.VISIBLE
+            val nowHidden = optimalText.visibility == View.VISIBLE
+            optimalText.visibility = if (nowHidden) View.INVISIBLE else View.VISIBLE
+            prefs.edit().putBoolean(PREF_OPTIMAL_HIDDEN, nowHidden).apply()
         }
 
         movesText.text = getString(R.string.moves_format, 0)
