@@ -1,6 +1,7 @@
 package com.vnp.fifteen
 
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -72,6 +73,11 @@ class MainActivity : AppCompatActivity() {
         }
         stepButton.setOnClickListener {
             stepTowardOptimal()
+        }
+        // Purely cosmetic spoiler toggle: tapping the label hides it in place (no layout shift),
+        // tapping the same spot again reveals it. Doesn't touch the solver or its live updates.
+        optimalText.setOnClickListener {
+            optimalText.visibility = if (optimalText.visibility == View.VISIBLE) View.INVISIBLE else View.VISIBLE
         }
 
         movesText.text = getString(R.string.moves_format, 0)
