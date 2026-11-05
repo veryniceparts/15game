@@ -1,7 +1,6 @@
 package com.vnp.fifteen
 
 import android.os.Bundle
-import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -28,6 +27,8 @@ class MainActivity : AppCompatActivity() {
     private var solverGeneration = 0
     private var isComputing = false
     private var currentMoves = 0
+    private var isOptimalHidden = false
+    private var optimalValueText = ""
 
     /** Remaining moves of the last known path to solved, and the board it was computed for. Null when stale/unknown. */
     private var cachedPath: IntArray? = null
@@ -65,7 +66,7 @@ class MainActivity : AppCompatActivity() {
         puzzleView.onShuffle = {
             cachedPath = null
             cachedPathBoard = null
-            optimalText.text = getString(R.string.optimal_computing)
+            setOptimalValue(getString(R.string.optimal_computing))
             refreshOptimal(INITIAL_EXACT_BUDGET_MS, INITIAL_GREEDY_BUDGET_MS, lockUi = false, playFirstMoveWhenDone = false)
         }
         shuffleButton.setOnClickListener {
@@ -77,22 +78,40 @@ class MainActivity : AppCompatActivity() {
         stepButton.setOnClickListener {
             stepTowardOptimal()
         }
-        // Purely cosmetic spoiler toggle: tapping the label hides it in place (no layout shift),
-        // tapping the same spot again reveals it. Doesn't touch the solver or its live updates.
+        // Purely cosmetic spoiler toggle: tapping the label hides its text in place (no layout
+        // shift, and the view stays VISIBLE so it keeps receiving taps -- an INVISIBLE view is
+        // skipped by touch dispatch entirely, which is why that approach couldn't be tapped back).
         // The hidden/shown choice is remembered across app restarts via SharedPreferences.
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        optimalText.visibility = if (prefs.getBoolean(PREF_OPTIMAL_HIDDEN, false)) View.INVISIBLE else View.VISIBLE
+        isOptimalHidden = prefs.getBoolean(PREF_OPTIMAL_HIDDEN, false)
         optimalText.setOnClickListener {
-            val nowHidden = optimalText.visibility == View.VISIBLE
-            optimalText.visibility = if (nowHidden) View.INVISIBLE else View.VISIBLE
-            prefs.edit().putBoolean(PREF_OPTIMAL_HIDDEN, nowHidden).apply()
+            isOptimalHidden = !isOptimalHidden
+            updateOptimalDisplay()
+            prefs.edit().putBoolean(PREF_OPTIMAL_HIDDEN, isOptimalHidden).apply()
         }
 
         movesText.text = getString(R.string.moves_format, 0)
         undoButton.isEnabled = false
         // Covers the initial shuffle already done while the view was created.
-        optimalText.text = getString(R.string.optimal_computing)
+        setOptimalValue(getString(R.string.optimal_computing))
         refreshOptimal(INITIAL_EXACT_BUDGET_MS, INITIAL_GREEDY_BUDGET_MS, lockUi = false, playFirstMoveWhenDone = false)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Stop any in-flight background solve; its generation is already stale once the activity
+        // goes away, but there's no reason to let it keep burning CPU until its budget expires.
+        solverThread?.interrupt()
+    }
+
+    /** Stores the latest computed label text and applies it (or hides it) via [updateOptimalDisplay]. */
+    private fun setOptimalValue(text: String) {
+        optimalValueText = text
+        updateOptimalDisplay()
+    }
+
+    private fun updateOptimalDisplay() {
+        optimalText.text = if (isOptimalHidden) "" else optimalValueText
     }
 
     /** Keeps [cachedPath] in sync with the board so the step button can keep following it without recomputing. */
@@ -148,7 +167,7 @@ class MainActivity : AppCompatActivity() {
             stepButton.isEnabled = false
             undoButton.isEnabled = false
             puzzleView.isLocked = true
-            optimalText.text = getString(R.string.optimal_computing)
+            setOptimalValue(getString(R.string.optimal_computing))
         }
 
         val board = puzzleView.snapshotBoard()
@@ -159,11 +178,11 @@ class MainActivity : AppCompatActivity() {
                 if (generation == solverGeneration) {
                     val path = when (result) {
                         is PuzzleSolver.PathResult.Exact -> {
-                            optimalText.text = getString(R.string.optimal_format, movesAtRequest + result.moves)
+                            setOptimalValue(getString(R.string.optimal_format, movesAtRequest + result.moves))
                             result.path
                         }
                         is PuzzleSolver.PathResult.Approximate -> {
-                            optimalText.text = getString(R.string.optimal_lower_bound_format, movesAtRequest + result.lowerBound)
+                            setOptimalValue(getString(R.string.optimal_lower_bound_format, movesAtRequest + result.lowerBound))
                             result.path
                         }
                     }
