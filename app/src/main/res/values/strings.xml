@@ -3,4 +3,11 @@
     <string name="moves_format">Moves: %1$d</string>
     <string name="shuffle">Shuffle</string>
     <string name="win_message">Solved in %1$d moves!</string>
+    <string name="optimal_computing">Optimal: calculating…</string>
+    <string name="optimal_format">Optimal: %1$d moves</string>
+    <string name="optimal_lower_bound_format">Optimal: at least %1$d moves (search timed out)</string>
+    <string name="undo_move">←</string>
+    <string name="step_toward_optimal">→</string>
+    <string name="undo_content_description">Undo last move</string>
+    <string name="step_content_description">Move one tile toward the optimal solution</string>
 </resources>
